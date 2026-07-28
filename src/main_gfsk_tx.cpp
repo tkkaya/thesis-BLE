@@ -9,15 +9,25 @@ static uint32_t lastSend = 0;
 
 void setup() {
   Serial.begin(115200);
+  Serial.setTxTimeoutMs(0); // Prevent blocking on battery power
   delay(1000);
+  
 #if USE_IMU_PAYLOAD
-  if (!imuBegin()) { Serial.println("MPU6050 init failed"); while(true) delay(1000); }
-  Serial.println("IMU ready");
+  if (!imuBegin()) { 
+    if (Serial) Serial.println("MPU6050 init failed"); 
+    while(true) delay(1000); 
+  }
+  if (Serial) Serial.println("IMU ready");
 #else
-  Serial.println("Dummy mode");
+  if (Serial) Serial.println("Dummy mode");
 #endif
-  if (!radioBeginGFSK(868.0)) { Serial.println("GFSK init failed"); while(true) delay(1000); }
-  Serial.println("GFSK TX ready — 868 MHz");
+  
+  if (!radioBeginGFSK(868.0)) { 
+    if (Serial) Serial.println("GFSK init failed"); 
+    while(true) delay(1000); 
+  }
+  
+  if (Serial) Serial.println("GFSK TX ready — 868 MHz");
 }
 
 void loop() {
@@ -30,6 +40,11 @@ void loop() {
 #else
   packDummy(pkt, NODE_ID, seq++);
 #endif
-  Serial.print(radioSendPacket(pkt) ? "TX OK  " : "TX FAIL ");
-  printPacket(Serial, pkt);
+
+  bool txSuccess = radioSendPacket(pkt);
+  
+  if (Serial) {
+    Serial.print(txSuccess ? "TX OK  " : "TX FAIL ");
+    printPacket(Serial, pkt);
+  }
 }

@@ -5,6 +5,14 @@
 static SX1262 radio = new Module(SX1262_NSS, SX1262_DIO1, SX1262_NRST, SX1262_BUSY);
 static bool loraMode = true;
 
+// --- Interrupt Flag ---
+static volatile bool rxFlag = false;
+
+// Direct IRAM_ATTR since we know this is compiling for ESP32S3
+IRAM_ATTR static void setRxFlag() {
+  rxFlag = true;
+}
+
 static void radioHardwareInit() {
   // Antenna switch must be HIGH or the radio transmits/receives nothing
   pinMode(SX1262_ANT_SW, OUTPUT);
@@ -19,9 +27,13 @@ bool radioBeginLoRa(float freqMHz) {
   radioHardwareInit();
   int s = radio.begin(freqMHz);
   if (s != RADIOLIB_ERR_NONE) {
-    Serial.print("LoRa init err: "); Serial.println(s);
+    if (Serial) { Serial.print("LoRa init err: "); Serial.println(s); }
     return false;
   }
+  
+  // Attach interrupt and arm continuous RX
+  radio.setPacketReceivedAction(setRxFlag);
+  radio.startReceive(); 
   return true;
 }
 
@@ -30,22 +42,46 @@ bool radioBeginGFSK(float freqMHz) {
   radioHardwareInit();
   int s = radio.beginFSK(freqMHz);
   if (s != RADIOLIB_ERR_NONE) {
-    Serial.print("GFSK init err: "); Serial.println(s);
+    if (Serial) { Serial.print("GFSK init err: "); Serial.println(s); }
     return false;
   }
+  
+  // Attach interrupt and arm continuous RX
+  radio.setPacketReceivedAction(setRxFlag);
+  radio.startReceive(); 
   return true;
 }
 
 bool radioSendPacket(const ImuPacket &pkt) {
-  return radio.transmit((uint8_t *)&pkt, sizeof(pkt)) == RADIOLIB_ERR_NONE;
+  bool success = (radio.transmit((uint8_t *)&pkt, sizeof(pkt)) == RADIOLIB_ERR_NONE);
+  // Return to background RX mode immediately after transmitting
+  radio.startReceive(); 
+  return success;
 }
 
 bool radioReceivePacket(ImuPacket &pkt, int16_t &rssi, int16_t &snr) {
-  int s = radio.receive((uint8_t *)&pkt, sizeof(pkt));
-  if (s == RADIOLIB_ERR_NONE) {
-    rssi = (int16_t)radio.getRSSI();
-    snr  = loraMode ? (int16_t)radio.getSNR() : 0;
-    return true;
+  // Check the hardware interrupt flag
+  if (rxFlag) {
+    rxFlag = false; // Clear the flag immediately
+    
+    int s = radio.readData((uint8_t *)&pkt, sizeof(pkt));
+    
+    // Re-arm background RX immediately so we don't miss the next packet
+    radio.startReceive(); 
+    
+    if (s == RADIOLIB_ERR_NONE) {
+      rssi = (int16_t)radio.getRSSI();
+      snr  = loraMode ? (int16_t)radio.getSNR() : 0;
+      return true;
+    } else {
+      // If we caught an interrupt but failed to read, print the error code.
+      // E.g., -7 is RADIOLIB_ERR_CRC_MISMATCH
+      if (Serial) { 
+        Serial.print("RX DROP (Error code: "); 
+        Serial.print(s); 
+        Serial.println(")"); 
+      }
+    }
   }
   return false;
 }
