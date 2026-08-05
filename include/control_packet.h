@@ -3,40 +3,33 @@
 #define CONTROL_PACKET_H
 
 #include <cstdint>
+#include <cstddef>
 
 #define CONTROL_MAGIC 0xC0
 
 enum CommandType : uint8_t {
-  CMD_SET_RATE          = 1,
-  CMD_SET_TOPOLOGY       = 2,
-  CMD_SET_TARGETS        = 3,
-  CMD_SET_RADIO_PARAMS   = 4,
-  CMD_START               = 5,
-  CMD_STOP                = 6,
-  CMD_STATUS              = 7,
-  CMD_ACK                 = 8
-};
-
-enum TopologyMode : uint8_t {
-  TOPO_ONE_TO_ONE   = 1,
-  TOPO_ONE_TO_MANY  = 2
+  CMD_SET_RATE         = 1,
+  CMD_SET_RADIO_PARAMS = 4,
+  CMD_START            = 5,
+  CMD_STOP             = 6,
+  CMD_STATUS           = 7,
+  CMD_ACK              = 8
 };
 
 // packed = no compiler padding, so this struct is byte-identical
 // on the wire regardless of platform.
 struct __attribute__((packed)) ControlPacket {
-  uint8_t  magic;       // always CONTROL_MAGIC — quick sanity check on receipt
-  uint8_t  cmd;         // one of CommandType
-  uint8_t  nodeId;      // target node ID, or 0xFF for "all nodes"
-  uint8_t  topology;    // one of TopologyMode
-  uint32_t intervalMs;  // desired send interval
-  uint32_t targetMask;  // bitmask of active TX node IDs (for 1:many)
-  float    freqMHz;     // radio frequency (FSK/LoRa only, ignored otherwise)
-  uint8_t  sf;          // LoRa spreading factor (ignored otherwise)
-  uint8_t  bw;          // encoded bandwidth index (ignored otherwise)
-  uint8_t  cr;          // LoRa coding rate (ignored otherwise)
-  uint8_t  reserved;    // padding/future use
-  uint16_t crc;         // simple checksum over the preceding bytes
+  uint8_t  magic;        // always CONTROL_MAGIC — quick sanity check on receipt
+  uint8_t  cmd;          // one of CommandType
+  uint8_t  targetNodeId; // MAC-derived target ID, or 0xFF for "all nodes"
+  uint8_t  reserved0;    // padding/future use
+  uint32_t intervalMs;   // desired send interval
+  float    freqMHz;      // radio frequency (FSK/LoRa only, ignored otherwise)
+  uint8_t  sf;           // LoRa spreading factor (ignored otherwise)
+  uint8_t  bw;           // encoded bandwidth index (ignored otherwise)
+  uint8_t  cr;           // LoRa coding rate (ignored otherwise)
+  uint8_t  reserved1;    // padding/future use
+  uint16_t crc;          // simple checksum over the preceding bytes
 };
 
 // Simple additive checksum — good enough for a control channel,

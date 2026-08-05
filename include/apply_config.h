@@ -1,4 +1,4 @@
-// applyConfig.h — signature shared by all firmwares, implementation is per-protocol
+// include/apply_config.h — signature shared by all firmwares, implementation is per-protocol
 #ifndef APPLY_CONFIG_H
 #define APPLY_CONFIG_H
 
