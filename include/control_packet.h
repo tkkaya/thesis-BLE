@@ -16,7 +16,9 @@ enum CommandType : uint8_t {
   CMD_STATUS           = 7,
   CMD_ACK              = 8,
   CMD_SET_GFSK_PARAMS  = 9,
-  CMD_SET_LORA_PARAMS  = 10
+  CMD_SET_LORA_PARAMS  = 10,
+  CMD_SET_NODE_COUNT     = 11 // ble only
+
 };
 
 // GFSK-specific radio parameters.

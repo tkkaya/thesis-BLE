@@ -38,8 +38,24 @@ bool applyConfig(const ControlPacket &cmd) {
 #elif defined(PROTOCOL_BLE)
 
 bool applyConfig(const ControlPacket &cmd) {
-  (void)cmd;
-  return false;
+  if (!isAddressedToMe(cmd.targetNodeId)) return true;
+
+  switch (cmd.cmd) {
+    case CMD_SET_RATE:
+      g_config.sendIntervalMs = cmd.intervalMs;
+      return true;
+
+    case CMD_START:
+      g_config.streamingEnabled = true;
+      return true;
+
+    case CMD_STOP:
+      g_config.streamingEnabled = false;
+      return true;
+
+    default:
+      return false;
+  }
 }
 
 #elif defined(PROTOCOL_FSK)
