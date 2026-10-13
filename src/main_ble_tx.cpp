@@ -10,8 +10,10 @@
 
 static uint16_t seq = 0;
 static uint32_t lastSend = 0;
+static bool imuReady = false;
 uint8_t g_myNodeId = 0;
 
+// Start the sensor if present, then advertise so control still works without it.
 void setup() {
   Serial.begin(115200);
   delay(1000);
@@ -19,8 +21,12 @@ void setup() {
   g_myNodeId = deriveNodeId();
 
 #if USE_IMU_PAYLOAD
-  if (!imuBegin()) { Serial.println("MPU6050 init failed"); while (true) delay(1000); }
-  Serial.println("IMU ready");
+  imuReady = imuBegin();
+  if (imuReady) {
+    Serial.println("IMU ready");
+  } else {
+    Serial.println("MPU6050 init failed; BLE control remains available");
+  }
 #else
   Serial.println("Dummy mode");
 #endif
@@ -31,10 +37,14 @@ void setup() {
   Serial.printf("[BLE TX] id=%u advertising as '%s'\n", g_myNodeId, name);
 }
 
+// Apply received commands, then send one packet whenever the selected interval expires.
 void loop() {
   ControlPacket cmd;
   if (blePollControl(cmd)) {
-    if (controlPacketValid(cmd)) {
+    if (!controlPacketValid(cmd)) {
+      Serial.printf("[BLE TX] invalid control packet magic=0x%02X crc=0x%04X calc=0x%04X\n",
+        cmd.magic, cmd.crc, controlPacketCrc(cmd));
+    } else {
       bool ok = applyConfig(cmd);
       Serial.printf("[BLE TX] id=%u cmd=%u target=%u applied=%s streaming=%u interval=%lu\n",
         g_myNodeId, cmd.cmd, cmd.targetNodeId, ok ? "yes" : "no",
@@ -48,7 +58,13 @@ void loop() {
 
   ImuPacket pkt;
 #if USE_IMU_PAYLOAD
-  ImuData d; imuRead(d); packImuData(d, pkt, g_myNodeId, seq++);
+  if (imuReady) {
+    ImuData d;
+    imuRead(d);
+    packImuData(d, pkt, g_myNodeId, seq++);
+  } else {
+    packDummy(pkt, g_myNodeId, seq++);
+  }
 #else
   packDummy(pkt, g_myNodeId, seq++);
 #endif

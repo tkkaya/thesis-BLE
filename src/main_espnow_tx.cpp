@@ -19,14 +19,17 @@ static uint32_t lastSend = 0;
 
 #define ESPNOW_CHANNEL 1
 
+// ESP-NOW sends telemetry directly to this receiver board.
 uint8_t rxMac[] = {0x84, 0xFC, 0xE6, 0x6B, 0x7F, 0x3C};
 uint8_t g_myNodeId = 0; // derived at boot in setup()
 
+// Report whether the radio queued the last packet successfully.
 void onDataSent(const wifi_tx_info_t *info, esp_now_send_status_t status) {
   Serial.print("[ESP-NOW TX] Send status: ");
   Serial.println(status == ESP_NOW_SEND_SUCCESS ? "OK" : "FAIL");
 }
 
+// Apply control frames received from the RX board.
 void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
   if (len < 1) return;
 
@@ -48,6 +51,7 @@ void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
   }
 }
 
+// Join the test channel and register the RX board as the peer.
 bool espNowBegin() {
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
@@ -79,6 +83,8 @@ bool espNowBegin() {
   return true;
 }
 
+// Initialize the node and its radio before waiting for START.
+// Set this node's ID, then start its sensor and ESP-NOW link.
 void setup() {
   Serial.begin(115200);
   Serial.setTxTimeoutMs(0);
@@ -98,6 +104,7 @@ void setup() {
   Serial.printf("[ESP-NOW TX] id=%d Ready\n", g_myNodeId);
 }
 
+// Send telemetry only while enabled and after the configured interval.
 void loop() {
   if (!g_config.streamingEnabled) return;
   if (millis() - lastSend < g_config.sendIntervalMs) return;

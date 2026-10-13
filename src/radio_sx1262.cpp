@@ -13,6 +13,7 @@ static float activeFreqMHz = 868.0;
 static volatile bool rxFlag = false;
 static volatile uint32_t isrFireCount = 0;
 
+// Keep the interrupt short; the main loop reads packet bytes later.
 IRAM_ATTR static void setRxFlag() {
   rxFlag = true;
   isrFireCount++;
@@ -69,6 +70,7 @@ static uint8_t loraCodingRateFromIndex(uint8_t index) {
   return 5 + index;
 }
 
+// Put the radio and board antenna switch back into receive mode.
 static void enterReceiveMode() {
   digitalWrite(SX1262_ANT_SW, HIGH);
   rxFlag = false;
@@ -78,6 +80,7 @@ static void enterReceiveMode() {
 
 // ─── LoRa ───────────────────────────────────────────────────────────────────
 
+// Start LoRa and apply the current frequency and modem settings.
 bool radioBeginLoRa(float freqMHz) {
   loraMode = true;
   activeFreqMHz = freqMHz;
@@ -148,6 +151,7 @@ bool radioBeginLoRa(float freqMHz) {
 
 // ─── GFSK ───────────────────────────────────────────────────────────────────
 
+// Start GFSK with the current bitrate, deviation, bandwidth, and preamble.
 bool radioBeginGFSK(float freqMHz) {
   loraMode = false;
   activeFreqMHz = freqMHz;
@@ -202,7 +206,7 @@ bool radioBeginGFSK(float freqMHz) {
   return true;
 }
 
-// ─── Airtime helper (used by the TX airtime guard) ──────────────────────────
+// ─── Airtime helper (reported in LoRa TX startup diagnostics) ────────────────
 
 uint32_t radioGetAirtimeMs(bool controlFrame) {
   size_t len = controlFrame ? (1 + sizeof(ControlPacket))
@@ -212,6 +216,7 @@ uint32_t radioGetAirtimeMs(bool controlFrame) {
 
 // ─── Sending ────────────────────────────────────────────────────────────────
 
+// Add a frame-type byte, transmit the packet, then listen again.
 bool radioSendPacket(const ImuPacket &pkt) {
   uint8_t buf[1 + sizeof(ImuPacket)];
   buf[0] = FRAME_TELEMETRY;
@@ -231,6 +236,7 @@ bool radioSendPacket(const ImuPacket &pkt) {
   return ok;
 }
 
+// Add the control marker, send the command, then listen again.
 bool radioSendControl(const ControlPacket &cmd) {
   uint8_t buf[1 + sizeof(ControlPacket)];
   buf[0] = FRAME_CONTROL;
@@ -249,6 +255,7 @@ bool radioSendControl(const ControlPacket &cmd) {
 
 // ─── Control reception on TX nodes ──────────────────────────────────────────
 
+// Read and validate one complete control frame for a TX node.
 bool radioPollControlFrame(ControlPacket &out) {
   if (!rxFlag) return false;
   rxFlag = false;
@@ -299,6 +306,7 @@ bool radioPollControlFrame(ControlPacket &out) {
 
 // ─── Telemetry reception on the RX node ─────────────────────────────────────
 
+// Read a telemetry frame and return its signal measurements.
 bool radioReceivePacket(ImuPacket &pkt, int16_t &rssi, int16_t &snr) {
   if (!rxFlag) return false;
   rxFlag = false;
@@ -331,4 +339,21 @@ bool radioReceivePacket(ImuPacket &pkt, int16_t &rssi, int16_t &snr) {
   rssi = static_cast<int16_t>(radio.getRSSI());
   snr = loraMode ? static_cast<int16_t>(radio.getSNR()) : 0;
   return true;
+}
+
+// Read LoRa ACK/control frames before the RX checks for telemetry.
+bool radioReceiveControlFrame(ControlPacket &cmd) {
+  if (!rxFlag) return false;
+
+  const size_t expectedLen = 1 + sizeof(ControlPacket);
+  if (radio.getPacketLength() != expectedLen) return false;
+
+  rxFlag = false;
+  uint8_t raw[1 + sizeof(ControlPacket)];
+  int state = radio.readData(raw, sizeof(raw));
+  radio.startReceive();
+  if (state != RADIOLIB_ERR_NONE || raw[0] != FRAME_CONTROL) return false;
+
+  memcpy(&cmd, raw + 1, sizeof(cmd));
+  return controlPacketValid(cmd);
 }

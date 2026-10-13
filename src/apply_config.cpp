@@ -12,6 +12,7 @@ static bool isAddressedToMe(uint8_t targetNodeId) {
          targetNodeId == g_myNodeId;
 }
 
+// Each build includes only the command handler for its radio protocol.
 #if defined(PROTOCOL_ESPNOW)
 
 bool applyConfig(const ControlPacket &cmd) {

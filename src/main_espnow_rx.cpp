@@ -12,11 +12,41 @@
 #define ESPNOW_CHANNEL 1
 
 static volatile bool packetReady = false;
+// This single slot keeps only the latest packet until loop() prints it.
 static ImuPacket rxPacket;
 static uint8_t lastSender[6] = {0};
+static uint32_t rxTimestampMs = 0;
+
+// Store one sender's identity alongside its packet counters.
+struct NodeTracker {
+  bool inUse = false;
+  uint8_t nodeId = 0;
+  PacketTracker packets;
+};
+
+static NodeTracker nodeTrackers[3];
+
+// Find this sender's counters, or reserve an empty tracker for it.
+static PacketTracker *trackerForNode(uint8_t nodeId) {
+  for (NodeTracker &entry : nodeTrackers) {
+    if (entry.inUse && entry.nodeId == nodeId) return &entry.packets;
+  }
+
+  for (NodeTracker &entry : nodeTrackers) {
+    if (!entry.inUse) {
+      entry.inUse = true;
+      entry.nodeId = nodeId;
+      entry.packets = {};
+      return &entry.packets;
+    }
+  }
+
+  return nullptr;
+}
 
 uint8_t broadcastMac[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
+// Validate and copy each incoming telemetry frame into the shared slot.
 void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
   if (len < 1) return;
 
@@ -27,12 +57,14 @@ void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
     }
     memcpy(&rxPacket, data + 1, sizeof(ImuPacket));
     memcpy(lastSender, info->src_addr, 6);
+    rxTimestampMs = millis();
     packetReady = true;
   }
-  // FRAME_CONTROL arriving here would be an ACK from a TX node —
-  // not implemented yet, but this is where you'd parse it.
+  // The current ESP-NOW TX firmware does not send FRAME_CONTROL responses.
+  // Add response handling here if a TX-to-RX control or ACK path is introduced.
 }
 
+// Put Wi-Fi and ESP-NOW on one channel, then register the receiver.
 bool espNowBegin() {
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
@@ -100,7 +132,8 @@ void pollSerialForControl() {
         err == ESP_OK ? "OK" : "FAIL");
     }
   }
-}void setup() {
+}// Start serial logging and prepare ESP-NOW reception.
+void setup() {
   Serial.begin(115200);
   Serial.setTxTimeoutMs(0);
   delay(1000);
@@ -111,9 +144,11 @@ void pollSerialForControl() {
   Serial.println("[ESP-NOW RX] Ready");
 }
 
+// Relay host commands, then process the latest received packet.
 void loop() {
   pollSerialForControl();
 
+  // Print the pending packet and update its sender's delivery counters.
   if (packetReady) {
     packetReady = false;
 
@@ -122,6 +157,14 @@ void loop() {
       lastSender[3], lastSender[4], lastSender[5],
       rxPacket.node_id);
 
+    PacketTracker *tracker = trackerForNode(rxPacket.node_id);
+    if (tracker != nullptr) trackPacket(*tracker, rxPacket);
     printPacket(Serial, rxPacket);
+    Serial.printf(" rx_ms=%lu node_received=%lu node_lost=%lu node_dup=%lu node_ooo=%lu\n\t",
+      static_cast<unsigned long>(rxTimestampMs),
+      tracker != nullptr ? static_cast<unsigned long>(tracker->received) : 0UL,
+      tracker != nullptr ? static_cast<unsigned long>(tracker->lost) : 0UL,
+      tracker != nullptr ? static_cast<unsigned long>(tracker->duplicates) : 0UL,
+      tracker != nullptr ? static_cast<unsigned long>(tracker->outOfOrder) : 0UL);
   }
 }

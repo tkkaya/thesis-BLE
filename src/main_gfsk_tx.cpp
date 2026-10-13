@@ -7,27 +7,40 @@
 #include "apply_config.h"
 #include "runtime_config.h"
 #include "identity.h"
-#include "esp_random.h"
 
 static uint16_t seq = 0;
-static uint32_t lastSend = 0;
+static uint32_t nextSendAt = 0;
+static uint32_t phaseOffsetMs = 0;
+static bool scheduleInitialized = false;
+static bool imuReady = false;
 
 uint8_t g_myNodeId = 0;
 
+// Give each known test node its own first-packet phase.
+static uint8_t nodeSlot(uint8_t nodeId) {
+  if (nodeId == 24) return 0;
+  if (nodeId == 88) return 1;
+  if (nodeId == 180) return 2;
+  return static_cast<uint8_t>((nodeId ^ (nodeId >> 3)) % 3);
+}
+
+// Offset only the first packet; later sends stay on the requested rate.
 static uint32_t telemetrySlotMs() {
   uint32_t interval = g_config.sendIntervalMs;
   if (interval == 0) interval = 1;
 
-  // Stable per-node phase, useful when comparing synchronized nodes.
-  uint32_t nodePhase = (g_myNodeId * 37UL) % interval;
+  if (!scheduleInitialized) {
+    // Spread the first transmission without changing the requested
+    // reporting period. The phase must not be added to every period.
+    phaseOffsetMs = (interval / 3) * nodeSlot(g_myNodeId);
+    nextSendAt = millis() + phaseOffsetMs;
+    scheduleInitialized = true;
+  }
 
-  // Small non-deterministic component to avoid two same-phase nodes
-  // staying permanently locked together.
-  uint32_t randomPhase = esp_random() % (interval < 20 ? interval : 20);
-
-  return (nodePhase + randomPhase) % interval;
+  return phaseOffsetMs;
 }
 
+// Set this node's ID and start the sensor and GFSK radio.
 void setup() {
   Serial.begin(115200);
   Serial.setTxTimeoutMs(0);
@@ -36,11 +49,12 @@ void setup() {
   g_myNodeId = deriveNodeId();
 
 #if USE_IMU_PAYLOAD
-  if (!imuBegin()) {
-    if (Serial) Serial.println("MPU6050 init failed");
-    while (true) delay(1000);
+  imuReady = imuBegin();
+  if (imuReady) {
+    if (Serial) Serial.println("IMU ready");
+  } else {
+    if (Serial) Serial.println("MPU6050 init failed; GFSK control remains available");
   }
-  if (Serial) Serial.println("IMU ready");
 #else
   if (Serial) Serial.println("Dummy mode");
 #endif
@@ -56,6 +70,7 @@ void setup() {
   }
 }
 
+// Apply controls, then send telemetry on this node's assigned phase.
 void loop() {
   static uint32_t lastIsrPrint = 0;
 
@@ -71,6 +86,12 @@ void loop() {
   ControlPacket cmd;
   if (radioPollControlFrame(cmd)) {
     bool ok = applyConfig(cmd);
+    if (cmd.cmd == CMD_SET_RATE || cmd.cmd == CMD_START ||
+        cmd.cmd == CMD_STOP) {
+      // Start a fresh first-packet phase after rate or stream changes.
+      scheduleInitialized = false;
+      nextSendAt = 0;
+    }
 
     if (Serial) {
       Serial.printf(
@@ -92,15 +113,24 @@ void loop() {
   }
 
   if (!g_config.streamingEnabled) return;
-  if (millis() - lastSend < g_config.sendIntervalMs + telemetrySlotMs()) return;
-  lastSend = millis();
+  telemetrySlotMs();
+  uint32_t interval = g_config.sendIntervalMs;
+  if (interval == 0) interval = 1;
+  uint32_t now = millis();
+  uint32_t wait = static_cast<uint32_t>(now - nextSendAt);
+  if (static_cast<int32_t>(wait) < 0) return;
+  nextSendAt += interval;
 
   ImuPacket pkt;
 
 #if USE_IMU_PAYLOAD
-  ImuData d;
-  imuRead(d);
-  packImuData(d, pkt, g_myNodeId, seq++);
+  if (imuReady) {
+    ImuData d;
+    imuRead(d);
+    packImuData(d, pkt, g_myNodeId, seq++);
+  } else {
+    packDummy(pkt, g_myNodeId, seq++);
+  }
 #else
   packDummy(pkt, g_myNodeId, seq++);
 #endif

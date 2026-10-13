@@ -18,12 +18,13 @@
 bool radioBeginLoRa(float freqMHz);
 bool radioBeginGFSK(float freqMHz);
 
-// TX-side: send telemetry, RX-side: send control (role-specific by design)
+// TX sends telemetry; RX sends control, while LoRa TX may send ACKs.
 bool radioSendPacket(const ImuPacket &pkt);
 bool radioSendControl(const ControlPacket &cmd);
 
-// RX-side: poll for telemetry, TX-side: poll for control (role-specific by design)
+// RX receives telemetry and LoRa ACKs; TX polls for incoming control.
 bool radioReceivePacket(ImuPacket &pkt, int16_t &rssi, int16_t &snr);
+bool radioReceiveControlFrame(ControlPacket &cmd);
 bool radioPollControlFrame(ControlPacket &out);
 
 uint32_t radioGetIsrFireCount();

@@ -5,6 +5,7 @@
   #include "imu.h"
 
   #pragma pack(push, 1)
+  // Compact, fixed-size sensor report sent by every protocol.
   struct ImuPacket {
     uint8_t  version;       // 1 = real IMU, 0xAA = dummy
     uint8_t  node_id;
@@ -20,8 +21,19 @@
   };
   #pragma pack(pop)
 
-  bool packImuData(const ImuData &in, ImuPacket &out, uint8_t nodeId, uint16_t seq);
+  // Keep delivery counts separate for each sender.
+  struct PacketTracker {
+    bool initialized = false;
+    uint16_t lastSeq = 0;
+    uint32_t received = 0;
+    uint32_t lost = 0;
+    uint32_t duplicates = 0;
+    uint32_t outOfOrder = 0;
+  };
+
+  void packImuData(const ImuData &in, ImuPacket &out, uint8_t nodeId, uint16_t seq);
   void packDummy   (ImuPacket &out, uint8_t nodeId, uint16_t seq);
   void printPacket (Stream &s, const ImuPacket &pkt, int16_t rssi = 0, int16_t snr = 0);
+  void trackPacket(PacketTracker &tracker, const ImuPacket &pkt);
 
   #endif

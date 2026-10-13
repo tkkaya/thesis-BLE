@@ -11,6 +11,6 @@ struct ImuData {
 };
 
 bool imuBegin(int sdaPin = 5, int sclPin = 6);
-bool imuRead(ImuData &data);
+void imuRead(ImuData &data);
 
 #endif

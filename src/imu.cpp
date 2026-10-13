@@ -5,6 +5,7 @@
 
 static Adafruit_MPU6050 mpu;
 
+// Start the sensor bus and set ranges used by the packet format.
 bool imuBegin(int sdaPin, int sclPin) {
   Wire.begin(sdaPin, sclPin);
   if (!mpu.begin()) return false;
@@ -14,7 +15,8 @@ bool imuBegin(int sdaPin, int sclPin) {
   return true;
 }
 
-bool imuRead(ImuData &data) {
+// Copy one sensor sample and the time it was read.
+void imuRead(ImuData &data) {
   sensors_event_t a, g, temp;
   mpu.getEvent(&a, &g, &temp);
   data.ax           = a.acceleration.x;
@@ -25,5 +27,4 @@ bool imuRead(ImuData &data) {
   data.gz           = g.gyro.z;
   data.temperature  = temp.temperature;
   data.timestamp_ms = millis();
-  return true;
 }

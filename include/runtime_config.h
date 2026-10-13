@@ -1,11 +1,16 @@
-// runtime_config.h — included by every node firmware
+// Shared runtime settings for firmware roles that apply control commands.
 #ifndef RUNTIME_CONFIG_H
 #define RUNTIME_CONFIG_H
 
 #include "control_packet.h"
 
+// Settings a node uses until control packets change them.
 struct RuntimeConfig {
+#if defined(PROTOCOL_LORA)
+  uint32_t sendIntervalMs   = 1000;
+#else
   uint32_t sendIntervalMs   = 100;
+#endif
   float    freqMHz          = 868.0f;
 
   // Bench-proven GFSK defaults:

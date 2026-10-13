@@ -1,10 +1,11 @@
-tkpi@tkpi:~ $ cat ~/radio_control.py
 #!/usr/bin/env python3
 
 import argparse
 import struct
 import sys
 import time
+from datetime import datetime
+from pathlib import Path
 
 import serial
 
@@ -17,8 +18,6 @@ CMD_SET_RATE = 1
 CMD_SET_RADIO_PARAMS = 4
 CMD_START = 5
 CMD_STOP = 6
-CMD_STATUS = 7
-CMD_ACK = 8
 CMD_SET_GFSK_PARAMS = 9
 CMD_SET_LORA_PARAMS = 10
 CMD_SET_NODE_COUNT = 11  # BLE RX-local only — never relayed to a TX board.
@@ -75,6 +74,7 @@ def make_packet(
     lora_tx_power_dbm=14,
     lora_preamble_symbols=8,
 ):
+    """Pack one command into the fixed format used by the firmware."""
     values = (
         CONTROL_MAGIC,
         cmd,
@@ -104,6 +104,7 @@ def make_packet(
 
 
 def send_packet(port, packet):
+    """Send the command a few times, then print any RX replies."""
     with serial.Serial(port, BAUD, timeout=1) as ser:
         # The RX board may reset when the serial port opens.
         time.sleep(2.2)
@@ -121,7 +122,69 @@ def send_packet(port, packet):
                 print(line)
 
 
+def capture_start(port, packet, seconds, protocol, node):
+    """Log RX output for a timed run, then send STOP and save the tail."""
+    log_dir = Path.home() / "radio_logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    node_label = "all" if node == CONTROL_BROADCAST_NODE_ID else str(node)
+    log_path = log_dir / f"{protocol}_{timestamp}_node-{node_label}.log"
+    stop_packet = make_packet(CMD_STOP, target_node_id=node)
+
+    print(f"Logging RX output to {log_path}")
+    with serial.Serial(port, BAUD, timeout=0.2) as ser:
+        # Opening the RX serial port may reset the board.
+        time.sleep(2.2)
+        ser.reset_input_buffer()
+
+        with log_path.open("w", encoding="utf-8", buffering=1) as log:
+            log.write(f"# protocol={protocol} port={port} node={node_label}\n")
+            log.write(f"# duration_seconds={seconds} started={datetime.now().isoformat()}\n")
+
+            try:
+                for _ in range(3):
+                    ser.write(packet)
+                    ser.flush()
+                    time.sleep(0.05)
+
+                print(f"Capture running for {seconds} seconds; STOP will be sent afterward.")
+                deadline = time.monotonic() + seconds
+                while time.monotonic() < deadline:
+                    raw = ser.readline()
+                    if raw:
+                        text = raw.decode(errors="replace")
+                        print(text, end="", flush=True)
+                        log.write(text)
+            finally:
+                print("Capture duration complete; sending STOP.")
+                for _ in range(3):
+                    ser.write(stop_packet)
+                    ser.flush()
+                    time.sleep(0.05)
+
+                # Keep logging the RX's relay messages and any packets in flight.
+                stop_deadline = time.monotonic() + 3
+                while time.monotonic() < stop_deadline:
+                    raw = ser.readline()
+                    if raw:
+                        text = raw.decode(errors="replace")
+                        print(text, end="", flush=True)
+                        log.write(text)
+
+    print(f"Log saved: {log_path}")
+
+
+def positive_seconds(value):
+    """Accept only a positive capture duration."""
+    seconds = int(value)
+    if seconds <= 0:
+        raise argparse.ArgumentTypeError("must be a positive number of seconds")
+    return seconds
+
+
 def build_parser():
+    """Define the command-line options for each radio operation."""
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--protocol", choices=PORTS.keys())
@@ -139,6 +202,12 @@ def build_parser():
 
     p_start = sub.add_parser("start")
     p_start.add_argument("--node", type=int, default=CONTROL_BROADCAST_NODE_ID)
+    p_start.add_argument(
+        "--log",
+        type=positive_seconds,
+        metavar="SECONDS",
+        help="capture RX serial output for this many seconds, then send STOP",
+    )
 
     p_stop = sub.add_parser("stop")
     p_stop.add_argument("--node", type=int, default=CONTROL_BROADCAST_NODE_ID)
@@ -184,6 +253,7 @@ def build_parser():
 
 
 def main():
+    """Build the selected command packet and send or capture it."""
     parser = build_parser()
     args = parser.parse_args()
 
@@ -263,7 +333,10 @@ def main():
         sys.exit("Must specify either --protocol or --port")
 
     print(f"Sending {len(packet)}-byte packet to {port}: {packet.hex(' ')}")
-    send_packet(port, packet)
+    if args.action == "start" and args.log is not None:
+        capture_start(port, packet, args.log, args.protocol or "custom", args.node)
+    else:
+        send_packet(port, packet)
 
 
 if __name__ == "__main__":

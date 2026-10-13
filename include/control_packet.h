@@ -13,11 +13,10 @@ enum CommandType : uint8_t {
   CMD_SET_RADIO_PARAMS = 4,   // Legacy/generic radio command; keep for compatibility
   CMD_START            = 5,
   CMD_STOP             = 6,
-  CMD_STATUS           = 7,
   CMD_ACK              = 8,
   CMD_SET_GFSK_PARAMS  = 9,
   CMD_SET_LORA_PARAMS  = 10,
-  CMD_SET_NODE_COUNT     = 11 // ble only
+  CMD_SET_NODE_COUNT     = 11 // BLE RX-local node-limit command
 
 };
 
@@ -41,8 +40,9 @@ struct __attribute__((packed)) LoraParams {
   uint8_t reserved[2];
 };
 
-// packed = no compiler padding, so this struct is byte-identical
-// on the wire regardless of platform.
+// Packed fields remove compiler padding. The wire format assumes the
+// little-endian ESP32/Python representation used by this project.
+// One fixed-size command shared by every radio transport.
 struct __attribute__((packed)) ControlPacket {
   uint8_t  magic;           // always CONTROL_MAGIC
   uint8_t  cmd;             // one of CommandType
@@ -58,6 +58,10 @@ struct __attribute__((packed)) ControlPacket {
   uint16_t crc;             // checksum over all preceding bytes
 };
 
+static_assert(sizeof(ControlPacket) == 31,
+              "ControlPacket size changed; update host framing and BLE MTU");
+
+// Add the bytes together to catch simple packet corruption.
 inline uint16_t controlPacketCrc(const ControlPacket &p) {
   const uint8_t *bytes = reinterpret_cast<const uint8_t *>(&p);
   uint16_t sum = 0;
@@ -69,11 +73,13 @@ inline uint16_t controlPacketCrc(const ControlPacket &p) {
   return sum;
 }
 
+// Fill in the marker and checksum before sending the command.
 inline void controlPacketFinalize(ControlPacket &p) {
   p.magic = CONTROL_MAGIC;
   p.crc = controlPacketCrc(p);
 }
 
+// Check the marker and checksum before applying a command.
 inline bool controlPacketValid(const ControlPacket &p) {
   return p.magic == CONTROL_MAGIC && p.crc == controlPacketCrc(p);
 }
