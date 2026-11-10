@@ -16,6 +16,7 @@ static volatile bool packetReady = false;
 static ImuPacket rxPacket;
 static uint8_t lastSender[6] = {0};
 static uint32_t rxTimestampMs = 0;
+static int16_t rxRssi = 0;
 
 // Store one sender's identity alongside its packet counters.
 struct NodeTracker {
@@ -48,7 +49,7 @@ uint8_t broadcastMac[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
 // Validate and copy each incoming telemetry frame into the shared slot.
 void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
-  if (len < 1) return;
+  if (!info || !info->src_addr || len < 1) return;
 
   if (data[0] == FRAME_TELEMETRY) {
     if (len - 1 != sizeof(ImuPacket)) {
@@ -57,6 +58,7 @@ void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
     }
     memcpy(&rxPacket, data + 1, sizeof(ImuPacket));
     memcpy(lastSender, info->src_addr, 6);
+    rxRssi = info->rx_ctrl ? info->rx_ctrl->rssi : 0;
     rxTimestampMs = millis();
     packetReady = true;
   }
@@ -159,7 +161,7 @@ void loop() {
 
     PacketTracker *tracker = trackerForNode(rxPacket.node_id);
     if (tracker != nullptr) trackPacket(*tracker, rxPacket);
-    printPacket(Serial, rxPacket);
+    printPacket(Serial, rxPacket, rxRssi);
     Serial.printf(" rx_ms=%lu node_received=%lu node_lost=%lu node_dup=%lu node_ooo=%lu\n\t",
       static_cast<unsigned long>(rxTimestampMs),
       tracker != nullptr ? static_cast<unsigned long>(tracker->received) : 0UL,

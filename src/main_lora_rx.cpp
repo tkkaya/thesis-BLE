@@ -47,7 +47,6 @@ static ControlPacket lastSerialControl = {};
 static uint32_t lastSerialControlAtMs = 0;
 static bool haveLastSerialControl = false;
 
-static constexpr uint8_t EXPERIMENT_NODE_IDS[] = {48, 88, 180};
 static constexpr uint32_t CONTROL_DUPLICATE_WINDOW_MS = 3000;
 
 static void clearControlQueue() {
